@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resumen Mundialista</title>
+  </head>
+  <body style="margin:0; padding:0; background:#082b1a; font-family:Arial, Helvetica, sans-serif; color:#f7fff9;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#082b1a; padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:760px; width:100%; margin:0 auto;">
+            <tr>
+              <td style="padding:28px 22px; background:#0f5132; border-radius:18px 18px 0 0; text-align:center; border-bottom:4px solid #d8f3dc;">
+                <div style="font-size:34px; font-weight:800; letter-spacing:.2px; color:#ffffff;">Resumen Mundialista ⚽</div>
+                <div style="font-size:16px; margin-top:8px; color:#d8f3dc;">Reporte diario - {{ report_date }}</div>
+                <div style="font-size:12px; margin-top:12px; color:#b7e4c7;">Fuente usada: {{ source_label }}</div>
+                {% if fallback_reason %}
+                  <div style="font-size:12px; margin-top:6px; color:#fff3b0;">{{ fallback_reason }}</div>
+                {% endif %}
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#f6fff8; color:#163b24; padding:22px; border-radius:0 0 18px 18px;">
+
+                <h2 style="margin:0 0 14px; color:#0f5132; font-size:22px;">Ayer: resultados y figuras</h2>
+                {% if yesterday_matches %}
+                  {% for match in yesterday_matches %}
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff; border:1px solid #d8f3dc; border-radius:14px; margin:0 0 14px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+                      <tr>
+                        <td style="padding:16px;">
+                          <div style="font-size:21px; font-weight:800; color:#081c15; margin-bottom:8px;">{{ match|score }}</div>
+                          <div style="font-size:13px; color:#52796f; margin-bottom:12px;">
+                            {% if match.round %}Etapa: {{ match.round }}{% endif %}{% if match.group %} · {{ match.group }}{% endif %}{% if match.venue %} · {{ match.venue }}{% endif %}{% if match.city %}, {{ match.city }}{% endif %}
+                          </div>
+
+                          <div style="font-size:14px; line-height:1.55; color:#1b4332;">
+                            <strong>Goles:</strong><br>
+                            {{ match|goals }}
+                          </div>
+
+                          <div style="font-size:14px; line-height:1.55; color:#1b4332; margin-top:10px;">
+                            <strong>Tarjetas:</strong><br>
+                            {{ match|cards }}
+                          </div>
+
+                          <div style="font-size:14px; line-height:1.55; color:#1b4332; margin-top:10px;">
+                            <strong>Estadísticas:</strong><br>
+                            {% if match.has_statistics and match.statistics_pairs %}
+                              {% for stat in match.statistics_pairs %}
+                                {{ stat.label }}: {{ stat.home }} - {{ stat.away }}<br>
+                              {% endfor %}
+                            {% else %}
+                              Estadísticas no disponibles todavía.
+                            {% endif %}
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  {% endfor %}
+                {% else %}
+                  <div style="background:#ffffff; color:#52796f; border:1px dashed #95d5b2; border-radius:14px; padding:16px; margin-bottom:20px;">
+                    No hay partidos registrados para ayer.
+                  </div>
+                {% endif %}
+
+                <h2 style="margin:24px 0 14px; color:#0f5132; font-size:22px;">Hoy: partidos del día</h2>
+                {% if today_matches %}
+                  {% for match in today_matches %}
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff; border:1px solid #d8f3dc; border-radius:14px; margin:0 0 14px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+                      <tr>
+                        <td style="padding:16px;">
+                          <div style="font-size:21px; font-weight:800; color:#081c15; margin-bottom:8px;">{{ match|score }}</div>
+                          <div style="font-size:14px; color:#1b4332; line-height:1.55;">
+                            <strong>{{ match|date_label(today_iso) }}</strong><br>
+                            {% if match.venue or match.city %}Estadio: {{ match.venue }}{% if match.city %}, {{ match.city }}{% endif %}<br>{% endif %}
+                            {% if match.round or match.group %}Etapa: {{ match.round }}{% if match.group %} · {{ match.group }}{% endif %}<br>{% endif %}
+                            Estado: {{ match.status|capitalize }}
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  {% endfor %}
+                {% else %}
+                  <div style="background:#ffffff; color:#52796f; border:1px dashed #95d5b2; border-radius:14px; padding:16px; margin-bottom:20px;">
+                    No hay partidos programados para hoy.
+                  </div>
+                {% endif %}
+
+                <h2 style="margin:24px 0 14px; color:#0f5132; font-size:22px;">Próximos partidos</h2>
+                {% if upcoming_matches %}
+                  {% for match in upcoming_matches %}
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#ffffff; border:1px solid #d8f3dc; border-radius:14px; margin:0 0 14px; box-shadow:0 1px 3px rgba(0,0,0,.08);">
+                      <tr>
+                        <td style="padding:16px;">
+                          <div style="font-size:21px; font-weight:800; color:#081c15; margin-bottom:8px;">{{ match|score }}</div>
+                          <div style="font-size:14px; color:#1b4332; line-height:1.55;">
+                            Fecha: {{ match.date }}<br>
+                            Horario: {{ match.time_argentina }} ARG<br>
+                            {% if match.venue or match.city %}Estadio: {{ match.venue }}{% if match.city %}, {{ match.city }}{% endif %}<br>{% endif %}
+                            {% if match.round or match.group %}Etapa: {{ match.round }}{% if match.group %} · {{ match.group }}{% endif %}{% endif %}
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  {% endfor %}
+                {% else %}
+                  <div style="background:#ffffff; color:#52796f; border:1px dashed #95d5b2; border-radius:14px; padding:16px;">
+                    No hay próximos partidos dentro del rango configurado.
+                  </div>
+                {% endif %}
+
+                <div style="margin-top:26px; padding-top:16px; border-top:1px solid #d8f3dc; font-size:12px; color:#52796f; line-height:1.5;">
+                  Este reporte no inventa datos: si eventos, estadísticas, xG o goleadores todavía no están disponibles en la fuente usada, se muestran como no disponibles.
+                </div>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>
