@@ -1,0 +1,42 @@
+name: Daily World Cup Telegram
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+      timezone: "America/Argentina/Buenos_Aires"
+  workflow_dispatch:
+
+jobs:
+  send-daily-telegram:
+    runs-on: ubuntu-latest
+
+    env:
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TIMEZONE: America/Argentina/Buenos_Aires
+      UPCOMING_DAYS: "3"
+      REPORT_START_HOUR: "10"
+      DRY_RUN: "false"
+      USE_OPENFOOTBALL_FALLBACK: "true"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run tests
+        run: pytest
+
+      - name: Run daily Telegram report
+        run: python main.py
