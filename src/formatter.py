@@ -89,3 +89,99 @@ def build_console_summary(context: dict[str, Any]) -> str:
     upcoming = len(context.get("upcoming_matches", []))
     source = context.get("source_label", "desconocida")
     return f"Fuente: {source} | Ayer: {yesterday} | Hoy: {today} | Próximos: {upcoming}"
+
+
+def _format_match_line(match: dict[str, Any], today_iso: str | None = None) -> str:
+    label = format_match_datetime_label(match, today_iso=today_iso)
+    score = format_score(match)
+    status = match.get("status") or "programado"
+    venue = match.get("venue") or ""
+    city = match.get("city") or ""
+    place = ""
+    if venue and city:
+        place = f" — {venue}, {city}"
+    elif venue:
+        place = f" — {venue}"
+    elif city:
+        place = f" — {city}"
+    return f"• {label}: {score} ({status}){place}"
+
+
+def _format_match_section(
+    title: str,
+    matches: list[dict[str, Any]],
+    today_iso: str | None = None,
+    window_label: str | None = None,
+) -> str:
+    heading = f"{title} ({window_label})" if window_label else title
+    if not matches:
+        return f"{heading}\nSin partidos para mostrar."
+
+    lines = [heading]
+    for match in matches:
+        lines.append(_format_match_line(match, today_iso=today_iso))
+
+        if match.get("status") == "finalizado":
+            goals = format_goals(match)
+            if goals and goals != "Detalle de goles no disponible todavía.":
+                lines.append(f"  Goles: {goals}")
+
+            cards = format_cards(match)
+            if cards and cards != "Tarjetas importantes no disponibles todavía.":
+                lines.append(f"  Tarjetas: {cards}")
+
+        stats = match.get("statistics_pairs") or []
+        if stats:
+            compact_stats = []
+            for stat in stats[:4]:
+                compact_stats.append(f"{stat['label']} {stat['home']}/{stat['away']}")
+            lines.append(f"  Stats: {' | '.join(compact_stats)}")
+
+    return "\n".join(lines)
+
+
+def render_daily_telegram(context: dict[str, Any]) -> str:
+    report_date = context.get("report_date", "")
+    today_iso = context.get("today_iso")
+    source = context.get("source_label", "desconocida")
+    fallback_reason = context.get("fallback_reason", "")
+    today_window_label = context.get("today_window_label", "")
+
+    parts = [
+        f"Resumen Mundialista - {report_date}",
+        f"Fuente: {source}",
+    ]
+
+    if today_window_label:
+        parts.append(f"Ventana de hoy: {today_window_label}")
+
+    if fallback_reason:
+        parts.append(f"Aviso: {fallback_reason}")
+
+    parts.extend(
+        [
+            "",
+            _format_match_section(
+                "Ayer",
+                context.get("yesterday_matches", []),
+                today_iso=today_iso,
+                window_label=context.get("yesterday_window_label"),
+            ),
+            "",
+            _format_match_section(
+                "Hoy",
+                context.get("today_matches", []),
+                today_iso=today_iso,
+                window_label=today_window_label,
+            ),
+            "",
+            _format_match_section(
+                "Próximos partidos",
+                context.get("upcoming_matches", []),
+                today_iso=today_iso,
+                window_label=context.get("upcoming_window_label"),
+            ),
+        ]
+    )
+
+    return "\n".join(parts).strip()
