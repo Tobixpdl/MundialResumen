@@ -7,8 +7,8 @@ from typing import Any
 from src.api_football_client import APIFootballClient, APIFootballError
 from src.config import Config, load_config
 from src.date_utils import format_ddmmyyyy, get_date_window
-from src.email_sender import send_email
-from src.formatter import build_console_summary, render_daily_email
+from src.telegram_sender import send_telegram_message
+from src.formatter import build_console_summary, render_daily_telegram
 from src.logger import get_logger
 from src.normalizer import (
     enrich_api_football_match,
@@ -90,7 +90,7 @@ def _fetch_from_openfootball(config: Config, yesterday: date, today: date, upcom
     }
 
 
-def build_email_context(config: Config) -> dict[str, Any]:
+def build_report_context(config: Config) -> dict[str, Any]:
     window = get_date_window(config.timezone, config.upcoming_days)
     yesterday = window["yesterday"]
     today = window["today"]
@@ -133,31 +133,29 @@ def build_email_context(config: Config) -> dict[str, Any]:
     }
 
 
-def save_preview(project_root: Path, html: str) -> Path:
+def save_preview(project_root: Path, text: str) -> Path:
     output_dir = project_root / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
-    preview_path = output_dir / "daily_email_preview.html"
-    preview_path.write_text(html, encoding="utf-8")
+    preview_path = output_dir / "daily_telegram_preview.txt"
+    preview_path.write_text(text, encoding="utf-8")
     return preview_path
 
 
 def main() -> None:
     config = load_config()
-    context = build_email_context(config)
-    html = render_daily_email(context, template_dir=config.project_root / "templates")
-
-    subject = f"Resumen Mundialista - {context['report_date']}"
+    context = build_report_context(config)
+    telegram_text = render_daily_telegram(context)
 
     logger.info(build_console_summary(context))
     logger.info("Fuente usada: %s", context["source_label"])
 
     if config.dry_run:
-        preview_path = save_preview(config.project_root, html)
-        logger.info("DRY_RUN=true: no se envió email. Preview guardada en %s", preview_path)
+        preview_path = save_preview(config.project_root, telegram_text)
+        logger.info("DRY_RUN=true: no se envió Telegram. Preview guardada en %s", preview_path)
         return
 
-    send_email(config, subject=subject, html_body=html)
-    logger.info("Email enviado correctamente a %s", config.email_to)
+    send_telegram_message(config, telegram_text)
+    logger.info("Mensaje enviado correctamente por Telegram al chat %s", config.telegram_chat_id)
 
 
 if __name__ == "__main__":
