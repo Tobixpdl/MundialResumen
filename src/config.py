@@ -16,6 +16,8 @@ class Config:
     smtp_password: str
     email_from: str
     email_to: str
+    telegram_token: str
+    telegram_chat_id: str
     timezone: str
     upcoming_days: int
     dry_run: bool
@@ -48,6 +50,8 @@ def load_config(project_root: Path | None = None) -> Config:
         smtp_password=os.getenv("SMTP_PASSWORD", ""),
         email_from=os.getenv("EMAIL_FROM", ""),
         email_to=os.getenv("EMAIL_TO", ""),
+        telegram_token=os.getenv("TELEGRAM_TOKEN", ""),
+        telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
         timezone=os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires"),
         upcoming_days=max(1, _as_int(os.getenv("UPCOMING_DAYS"), 3)),
         dry_run=_as_bool(os.getenv("DRY_RUN"), False),
