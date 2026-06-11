@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from .date_utils import format_ddmmyyyy
+
+
+DAY_NAMES_ES = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"]
 
 
 def format_score(match: dict[str, Any]) -> str:
@@ -91,97 +95,78 @@ def build_console_summary(context: dict[str, Any]) -> str:
     return f"Fuente: {source} | Ayer: {yesterday} | Hoy: {today} | Próximos: {upcoming}"
 
 
-def _format_match_line(match: dict[str, Any], today_iso: str | None = None) -> str:
-    label = format_match_datetime_label(match, today_iso=today_iso)
+def _format_telegram_time(time_value: str | None) -> str:
+    if not time_value:
+        return "Horario a confirmar"
+
+    clean_time = str(time_value).strip()[:5]
+    if ":" not in clean_time:
+        return clean_time
+
+    hour_text, minute_text = clean_time.split(":", maxsplit=1)
+    try:
+        hour = int(hour_text)
+    except ValueError:
+        return clean_time
+
+    if minute_text == "00":
+        return f"{hour}hs"
+    return f"{hour}:{minute_text}"
+
+
+def _format_telegram_date(date_value: str | None) -> str:
+    if not date_value:
+        return "Fecha a confirmar"
+
+    try:
+        parsed_date = datetime.fromisoformat(str(date_value)).date()
+    except ValueError:
+        return str(date_value)
+
+    day_name = DAY_NAMES_ES[parsed_date.weekday()]
+    return f"{day_name} {parsed_date.strftime('%d/%m')}"
+
+
+def _format_telegram_match_line(match: dict[str, Any], include_date: bool = False) -> str:
+    time_label = _format_telegram_time(match.get("time_argentina"))
     score = format_score(match)
-    status = match.get("status") or "programado"
-    venue = match.get("venue") or ""
-    city = match.get("city") or ""
-    place = ""
-    if venue and city:
-        place = f" — {venue}, {city}"
-    elif venue:
-        place = f" — {venue}"
-    elif city:
-        place = f" — {city}"
-    return f"• {label}: {score} ({status}){place}"
+
+    if include_date:
+        date_label = _format_telegram_date(match.get("date"))
+        return f"• {date_label} · {time_label} — {score}"
+
+    return f"• {time_label} — {score}"
 
 
-def _format_match_section(
-    title: str,
-    matches: list[dict[str, Any]],
-    today_iso: str | None = None,
-    window_label: str | None = None,
-) -> str:
-    heading = f"{title} ({window_label})" if window_label else title
+def _format_telegram_match_section(title: str, matches: list[dict[str, Any]], include_date: bool = False) -> str:
     if not matches:
-        return f"{heading}\nSin partidos para mostrar."
+        return f"{title}\nSin partidos."
 
-    lines = [heading]
+    lines = [title]
     for match in matches:
-        lines.append(_format_match_line(match, today_iso=today_iso))
+        lines.append(_format_telegram_match_line(match, include_date=include_date))
 
         if match.get("status") == "finalizado":
             goals = format_goals(match)
             if goals and goals != "Detalle de goles no disponible todavía.":
-                lines.append(f"  Goles: {goals}")
+                lines.append(f"  ⚽ Goles: {goals}")
 
             cards = format_cards(match)
             if cards and cards != "Tarjetas importantes no disponibles todavía.":
-                lines.append(f"  Tarjetas: {cards}")
-
-        stats = match.get("statistics_pairs") or []
-        if stats:
-            compact_stats = []
-            for stat in stats[:4]:
-                compact_stats.append(f"{stat['label']} {stat['home']}/{stat['away']}")
-            lines.append(f"  Stats: {' | '.join(compact_stats)}")
+                lines.append(f"  🟨 Tarjetas: {cards}")
 
     return "\n".join(lines)
 
 
 def render_daily_telegram(context: dict[str, Any]) -> str:
-    report_date = context.get("report_date", "")
-    today_iso = context.get("today_iso")
-    source = context.get("source_label", "desconocida")
-    fallback_reason = context.get("fallback_reason", "")
-    today_window_label = context.get("today_window_label", "")
-
     parts = [
-        f"Resumen Mundialista - {report_date}",
-        f"Fuente: {source}",
+        "🏆 Mundial 2026",
+        "",
+        _format_telegram_match_section("📌 Ayer", context.get("yesterday_matches", [])),
+        "",
+        _format_telegram_match_section("🔥 Hoy", context.get("today_matches", [])),
+        "",
+        _format_telegram_match_section("📅 Próximos partidos", context.get("upcoming_matches", []), include_date=True),
     ]
-
-    if today_window_label:
-        parts.append(f"Ventana de hoy: {today_window_label}")
-
-    if fallback_reason:
-        parts.append(f"Aviso: {fallback_reason}")
-
-    parts.extend(
-        [
-            "",
-            _format_match_section(
-                "Ayer",
-                context.get("yesterday_matches", []),
-                today_iso=today_iso,
-                window_label=context.get("yesterday_window_label"),
-            ),
-            "",
-            _format_match_section(
-                "Hoy",
-                context.get("today_matches", []),
-                today_iso=today_iso,
-                window_label=today_window_label,
-            ),
-            "",
-            _format_match_section(
-                "Próximos partidos",
-                context.get("upcoming_matches", []),
-                today_iso=today_iso,
-                window_label=context.get("upcoming_window_label"),
-            ),
-        ]
-    )
 
     return "\n".join(parts).strip()
