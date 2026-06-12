@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 
@@ -16,6 +16,86 @@ def get_date_window(tz_name: str, upcoming_days: int = 3, now: datetime | None =
         "yesterday": today - timedelta(days=1),
         "today": today,
         "upcoming": [today + timedelta(days=i) for i in range(1, upcoming_days + 1)],
+    }
+
+
+def _window_label(start: datetime, end: datetime) -> str:
+    return f"{start.strftime('%d/%m %H:%M')} a {end.strftime('%d/%m %H:%M')} ARG"
+
+
+def _dates_covered_by_window(start: datetime, end: datetime) -> list[date]:
+    dates: list[date] = []
+    current = start.date()
+    last = end.date()
+    while current <= last:
+        dates.append(current)
+        current += timedelta(days=1)
+    return dates
+
+
+def get_report_windows(
+    tz_name: str,
+    upcoming_days: int = 3,
+    start_hour: int = 10,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """
+    Build report windows anchored to the local calendar date.
+
+    Example with start_hour=10 and local date 05/06:
+    - Ayer: 04/06 10:00 <= match < 05/06 10:00
+    - Hoy: 05/06 10:00 <= match < 06/06 10:00
+    - Próximos: following windows of 24 hours, also starting at 10:00
+    """
+    tz = ZoneInfo(tz_name)
+    local_now = now.astimezone(tz) if now else now_in_timezone(tz_name)
+    report_date = local_now.date()
+
+    start_hour = max(0, min(23, start_hour))
+
+    def start_for(day: date) -> datetime:
+        return datetime.combine(day, time(hour=start_hour), tzinfo=tz)
+
+    today_start = start_for(report_date)
+    today_end = today_start + timedelta(days=1)
+    yesterday_start = today_start - timedelta(days=1)
+    yesterday_end = today_start
+
+    upcoming_windows: list[dict[str, object]] = []
+    for index in range(1, upcoming_days + 1):
+        start = today_start + timedelta(days=index)
+        end = start + timedelta(days=1)
+        upcoming_windows.append(
+            {
+                "date": start.date(),
+                "start": start,
+                "end": end,
+                "label": _window_label(start, end),
+            }
+        )
+
+    fetch_dates: set[date] = set()
+    for start, end in [(yesterday_start, yesterday_end), (today_start, today_end)]:
+        fetch_dates.update(_dates_covered_by_window(start, end))
+    for window in upcoming_windows:
+        fetch_dates.update(_dates_covered_by_window(window["start"], window["end"]))
+
+    return {
+        "report_date": report_date,
+        "yesterday": {
+            "date": yesterday_start.date(),
+            "start": yesterday_start,
+            "end": yesterday_end,
+            "label": _window_label(yesterday_start, yesterday_end),
+        },
+        "today": {
+            "date": today_start.date(),
+            "start": today_start,
+            "end": today_end,
+            "label": _window_label(today_start, today_end),
+        },
+        "upcoming": upcoming_windows,
+        "fetch_dates": sorted(fetch_dates),
     }
 
 
