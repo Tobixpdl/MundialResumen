@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
+import re
+from datetime import date, datetime
 from typing import Any
+from urllib.parse import unquote, urlparse
+from zoneinfo import ZoneInfo
 
 from .date_utils import parse_openfootball_datetime, utc_to_timezone
 
@@ -43,6 +46,7 @@ def empty_match() -> dict[str, Any]:
     return {
         "source": "",
         "fixture_id": None,
+        "kickoff_at": "",
         "date": "",
         "time_argentina": "",
         "home_team": "",
@@ -118,6 +122,7 @@ def normalize_api_football_fixture(raw: dict[str, Any], timezone_name: str) -> d
         {
             "source": "api-football",
             "fixture_id": fixture.get("id"),
+            "kickoff_at": local_dt.isoformat() if local_dt else "",
             "date": local_dt.date().isoformat() if local_dt else "",
             "time_argentina": local_dt.strftime("%H:%M") if local_dt else "",
             "home_team": _safe_get(teams, "home", "name", default="Equipo local"),
@@ -233,6 +238,196 @@ def enrich_api_football_match(
     return match
 
 
+ELNINE_TEAM_NAME_FIXES = {
+    "argentina": "Argentina",
+    "australia": "Australia",
+    "belgica": "Bélgica",
+    "bosnia-herzegovina": "Bosnia-Herzegovina",
+    "brasil": "Brasil",
+    "canada": "Canadá",
+    "corea-del-sur": "Corea del Sur",
+    "costa-de-marfil": "Costa de Marfil",
+    "croacia": "Croacia",
+    "dinamarca": "Dinamarca",
+    "ecuador": "Ecuador",
+    "egipto": "Egipto",
+    "escocia": "Escocia",
+    "espana": "España",
+    "estados-unidos": "Estados Unidos",
+    "francia": "Francia",
+    "haiti": "Haití",
+    "inglaterra": "Inglaterra",
+    "japon": "Japón",
+    "marruecos": "Marruecos",
+    "mexico": "México",
+    "nueva-zelanda": "Nueva Zelanda",
+    "paises-bajos": "Países Bajos",
+    "paraguay": "Paraguay",
+    "qatar": "Qatar",
+    "republica-checa": "República Checa",
+    "sudafrica": "Sudáfrica",
+    "suiza": "Suiza",
+    "uruguay": "Uruguay",
+}
+
+
+def _normalize_elnine_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").replace("–", "—")).strip()
+
+
+def _collapse_repeated_team_name(value: str) -> str:
+    text = _normalize_elnine_text(value)
+    if not text:
+        return ""
+
+    tokens = text.split()
+    if len(tokens) >= 2 and len(tokens) % 2 == 0:
+        half = len(tokens) // 2
+        if tokens[:half] == tokens[half:]:
+            return " ".join(tokens[:half])
+
+    return text
+
+
+def _humanize_elnine_slug(value: str) -> str:
+    slug = unquote(value or "").strip("-/").lower()
+    fixed = ELNINE_TEAM_NAME_FIXES.get(slug)
+    if fixed:
+        return fixed
+    return " ".join(word.capitalize() for word in slug.replace("-", " ").split())
+
+
+def _fallback_elnine_teams_from_url(url: str) -> tuple[str, str]:
+    path = urlparse(str(url or "")).path
+    match = re.search(r"/partido/(?P<teams>.+?)-\d{4}-\d{2}-\d{2}(?:-|$)", path)
+    if not match:
+        return "Equipo local", "Equipo visitante"
+
+    teams_slug = match.group("teams")
+    if "-vs-" not in teams_slug:
+        return "Equipo local", "Equipo visitante"
+
+    home_slug, away_slug = teams_slug.split("-vs-", maxsplit=1)
+    return _humanize_elnine_slug(home_slug), _humanize_elnine_slug(away_slug)
+
+
+def _parse_elnine_int(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except ValueError:
+        return None
+
+
+def _strip_elnine_events_tail(value: str) -> str:
+    # En el listado de ELNINE, después del visitante pueden venir goleadores: "9 ' J. Quiñones".
+    return re.split(r"\s+\d{1,3}(?:\+\d+)?\s*['’]", value, maxsplit=1)[0].strip()
+
+
+def _parse_elnine_match_text(raw_text: str, fallback_home: str, fallback_away: str) -> dict[str, Any]:
+    text = _normalize_elnine_text(raw_text)
+    body = text
+    status = "programado"
+    status_raw = "NS"
+    time_value = ""
+
+    status_match = re.match(r"^(FIN|FINAL|SUSP|POST|PST|CANC|CAN|ABD|VIVO|LIVE|1T|2T|ET|MT|DESC)\b\s*", body, flags=re.IGNORECASE)
+    if status_match:
+        prefix = status_match.group(1).upper()
+        body = body[status_match.end() :].strip()
+        if prefix in {"FIN", "FINAL"}:
+            status = "finalizado"
+            status_raw = "FT"
+        elif prefix in {"SUSP", "POST", "PST"}:
+            status = "postergado"
+            status_raw = "PST"
+        elif prefix in {"CANC", "CAN", "ABD"}:
+            status = "cancelado"
+            status_raw = "CANC"
+        else:
+            status = "en vivo"
+            status_raw = "LIVE"
+
+    time_match = re.match(r"^(?P<time>\d{1,2}:\d{2})\b\s*", body)
+    if time_match:
+        time_value = time_match.group("time")
+        if len(time_value) == 4:
+            time_value = f"0{time_value}"
+        body = body[time_match.end() :].strip()
+
+    home_score: int | None = None
+    away_score: int | None = None
+    home_team = fallback_home
+    away_team = fallback_away
+
+    score_match = re.search(r"\s(?P<home_score>\d+)\s*[—-]\s*(?P<away_score>\d+)\s", f" {body} ")
+    if score_match:
+        # Ajustamos por el espacio agregado al principio.
+        start = max(score_match.start() - 1, 0)
+        end = max(score_match.end() - 1, 0)
+        home_raw = body[:start].strip()
+        away_raw = body[end:].strip()
+        home_team = _collapse_repeated_team_name(home_raw) or fallback_home
+        away_team = _collapse_repeated_team_name(_strip_elnine_events_tail(away_raw)) or fallback_away
+        home_score = _parse_elnine_int(score_match.group("home_score"))
+        away_score = _parse_elnine_int(score_match.group("away_score"))
+        if status == "programado":
+            status = "finalizado"
+            status_raw = "FT"
+    else:
+        teams = re.split(r"\s+[—-]\s+", body, maxsplit=1)
+        if len(teams) == 2:
+            home_team = _collapse_repeated_team_name(teams[0]) or fallback_home
+            away_team = _collapse_repeated_team_name(teams[1]) or fallback_away
+
+    return {
+        "time_argentina": time_value,
+        "home_team": home_team,
+        "away_team": away_team,
+        "home_score": home_score,
+        "away_score": away_score,
+        "status": status,
+        "status_raw": status_raw,
+    }
+
+
+def normalize_elnine_match(raw: dict[str, Any], timezone_name: str, index: int = 0) -> dict[str, Any]:
+    date_value = str(raw.get("date") or "")
+    fallback_home, fallback_away = _fallback_elnine_teams_from_url(str(raw.get("url") or ""))
+    parsed = _parse_elnine_match_text(str(raw.get("text") or ""), fallback_home, fallback_away)
+
+    time_value = parsed.get("time_argentina") or "00:00"
+    try:
+        local_dt = datetime.fromisoformat(f"{date_value}T{time_value}:00").replace(tzinfo=ZoneInfo(timezone_name))
+    except ValueError:
+        local_dt = None
+
+    match = empty_match()
+    match.update(
+        {
+            "source": "elnine",
+            "fixture_id": f"elnine-{index + 1}-{date_value}",
+            "kickoff_at": local_dt.isoformat() if local_dt else "",
+            "date": date_value,
+            "time_argentina": parsed.get("time_argentina") or "",
+            "home_team": parsed.get("home_team") or fallback_home,
+            "away_team": parsed.get("away_team") or fallback_away,
+            "home_score": parsed.get("home_score"),
+            "away_score": parsed.get("away_score"),
+            "status": parsed.get("status") or "programado",
+            "status_raw": parsed.get("status_raw") or "NS",
+            "round": "",
+            "group": "",
+            "venue": "",
+            "city": "",
+        }
+    )
+    return match
+
+
+def normalize_elnine_matches(raw_matches: list[dict[str, Any]], timezone_name: str) -> list[dict[str, Any]]:
+    return [normalize_elnine_match(item, timezone_name, index=i) for i, item in enumerate(raw_matches)]
+
+
 def _score_from_openfootball(raw: dict[str, Any]) -> tuple[int | None, int | None]:
     for left_key, right_key in [("score1", "score2"), ("goals1", "goals2")]:
         if left_key in raw and right_key in raw:
@@ -255,6 +450,7 @@ def normalize_openfootball_match(raw: dict[str, Any], timezone_name: str, index:
         {
             "source": "openfootball",
             "fixture_id": f"openfootball-{raw.get('num', index)}",
+            "kickoff_at": local_dt.isoformat(),
             "date": local_dt.date().isoformat(),
             "time_argentina": local_dt.strftime("%H:%M"),
             "home_team": raw.get("team1") or raw.get("home_team") or "Equipo local",
@@ -274,6 +470,42 @@ def normalize_openfootball_match(raw: dict[str, Any], timezone_name: str, index:
 
 def normalize_openfootball_matches(raw_matches: list[dict[str, Any]], timezone_name: str) -> list[dict[str, Any]]:
     return [normalize_openfootball_match(item, timezone_name, index=i + 1) for i, item in enumerate(raw_matches)]
+
+
+def _match_kickoff(match: dict[str, Any], fallback_tzinfo: Any = None) -> datetime | None:
+    kickoff_at = match.get("kickoff_at")
+    if kickoff_at:
+        try:
+            parsed = datetime.fromisoformat(str(kickoff_at))
+            if parsed.tzinfo is None and fallback_tzinfo is not None:
+                parsed = parsed.replace(tzinfo=fallback_tzinfo)
+            return parsed
+        except ValueError:
+            return None
+
+    date_value = match.get("date")
+    time_value = match.get("time_argentina")
+    if not date_value or not time_value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(f"{date_value}T{time_value}:00")
+        if fallback_tzinfo is not None:
+            parsed = parsed.replace(tzinfo=fallback_tzinfo)
+        return parsed
+    except ValueError:
+        return None
+
+
+def filter_matches_by_window(matches: list[dict[str, Any]], start: datetime, end: datetime) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for match in matches:
+        kickoff = _match_kickoff(match, fallback_tzinfo=start.tzinfo)
+        if kickoff is None:
+            continue
+        if start <= kickoff < end:
+            filtered.append(match)
+    return filtered
 
 
 def filter_matches_by_date(matches: list[dict[str, Any]], target_date: date) -> list[dict[str, Any]]:

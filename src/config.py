@@ -20,8 +20,10 @@ class Config:
     telegram_chat_id: str
     timezone: str
     upcoming_days: int
+    report_start_hour: int
     dry_run: bool
     use_openfootball_fallback: bool
+    use_elnine_fallback: bool
     project_root: Path
 
 
@@ -36,6 +38,15 @@ def _as_int(value: str | None, default: int) -> int:
         return int(value) if value is not None else default
     except ValueError:
         return default
+
+
+def _as_hour(value: str | None, default: int = 10) -> int:
+    hour = _as_int(value, default)
+    if hour < 0:
+        return 0
+    if hour > 23:
+        return 23
+    return hour
 
 
 def load_config(project_root: Path | None = None) -> Config:
@@ -54,7 +65,9 @@ def load_config(project_root: Path | None = None) -> Config:
         telegram_chat_id=os.getenv("TELEGRAM_CHAT_ID", ""),
         timezone=os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires"),
         upcoming_days=max(1, _as_int(os.getenv("UPCOMING_DAYS"), 3)),
+        report_start_hour=_as_hour(os.getenv("REPORT_START_HOUR"), 10),
         dry_run=_as_bool(os.getenv("DRY_RUN"), False),
         use_openfootball_fallback=_as_bool(os.getenv("USE_OPENFOOTBALL_FALLBACK"), True),
+        use_elnine_fallback=_as_bool(os.getenv("USE_ELNINE_FALLBACK"), True),
         project_root=root,
     )
